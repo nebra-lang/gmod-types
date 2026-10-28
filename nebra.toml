@@ -1,0 +1,5 @@
+name = "gmod-types"
+version = "0.1.0"
+target = "jit"
+
+types_only = true
