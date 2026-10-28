@@ -373,6 +373,28 @@ function hookType(hook) {
     return `(${parameters.join(', ')}) -> ${result}`;
 }
 
+// The hooks of the given containers as methods, which the engine calls with `:` and code
+// calls the same way, such as `self:CanPrimaryAttack()` or `GAMEMODE:PlayerSpawn(ply)`.
+function hookMethods(parents, keyword, inherited) {
+    const out = [];
+    const seen = new Set(inherited);
+    for (const parent of parents) {
+        for (const hook of membersOf('hook', parent)) {
+            if (!isIdentifier(hook.name)) continue;
+            const list = argumentLists(hook)[0];
+            const returns = hook.returns || [];
+            const result = returns.length === 0 ? 'any' : optionalType(entryType(returns[0]));
+            const override = seen.has(hook.name) && inherited.has(hook.name);
+            if (seen.has(hook.name) && !override) continue;
+            seen.add(hook.name);
+            out.push(...docLines('    ', hook, list, hook.returns));
+            out.push(...sideLine('    ', hook.realm));
+            out.push(`    ${override ? 'override ' : ''}${keyword} ${hook.name}(${parameterList(list)}): ${result}`);
+        }
+    }
+    return out;
+}
+
 function hookFields(parents) {
     const out = [];
     const seen = new Set();
@@ -398,8 +420,9 @@ function emitGamemode() {
     out.push('end');
     out.push('');
     out.push('--- A gamemode table: its settings and the hooks it implements.');
-    out.push('declare interface Gamemode extends GMHooks');
+    out.push('declare interface Gamemode');
     out.push(...structFields('GM').filter(line => !/^\s+BaseClass:/.test(line)));
+    out.push(...hookMethods(['GM', 'SANDBOX'], 'method', new Set()));
     out.push('    --- The gamemode this one derives from.');
     out.push('    BaseClass: Gamemode');
     out.push('end');
@@ -418,14 +441,10 @@ function emitScripted(name, base, hookParent, struct) {
         if (!isIdentifier(field.name)) continue;
         extra.push(`    ${field.name}: ${optionalType(entryType(field))}`);
     }
-    const inherited = new Set([...inheritedMethods(base), ...extra.map(line => line.trim().split(':')[0])]);
-    for (const hook of membersOf('hook', hookParent)) {
-        if (inherited.has(hook.name) || !isIdentifier(hook.name)) continue;
-        inherited.add(hook.name);
-        extra.push(...docLines('    ', hook, argumentLists(hook)[0], hook.returns));
-        extra.push(`    ${hook.name}: (${hookType(hook)})?`);
-    }
-    return [`declare class ${name} extends ${base}`, ...extra, 'end'].join('\n');
+    const fieldNames = new Set(extra.map(line => line.trim().split(':')[0]));
+    const hooks = hookMethods([hookParent], 'function', inheritedMethods(base))
+        .filter(line => !fieldNames.has((line.match(/function (\w+)\(/) || [])[1]));
+    return [`declare class ${name} extends ${base}`, ...extra, ...hooks, 'end'].join('\n');
 }
 
 // A library such as `net` or `hook`. One the standard library declares adds the members it
